@@ -1,273 +1,180 @@
-# Claude Desktop MCP Configuration
+# Claude Code Deployment Instructions
 
-**Instructions for connecting Claude Desktop to your always-on MCP servers.**
+**Copy these instructions to Claude Code in Cursor for automated deployment.**
 
-## Prerequisites
-
-- Claude Desktop app installed on your Mac
-- SSH access to your server (134.199.159.190)
-- MCP servers running (follow README.md setup first)
-
-## Step 1: Create SSH Tunnel
-
-Open Terminal on your Mac and create an SSH tunnel:
-
-```bash
-ssh -L 3001:localhost:3001 root@134.199.159.190
-```
-
-Keep this terminal window open while using Claude Desktop.
-
-## Step 2: Configure Claude Desktop
-
-1. Open Claude Desktop
-2. Go to **Settings** → **Developer** → **MCP Settings**
-3. Click **Edit Config** (this opens `~/Library/Application Support/Claude/claude_desktop_config.json`)
-
-## Step 3: Add MCP Server Configuration
-
-Add this to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "node",
-      "args": ["/path/to/local/mcp-client.js"],
-      "env": {
-        "MCP_SERVER_URL": "http://localhost:3001",
-        "MCP_SERVER_TYPE": "filesystem"
-      }
-    }
-  }
-}
-```
-
-**Alternative: Direct HTTP Configuration** (if supported in your Claude version):
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "transport": "http",
-      "url": "http://localhost:3001",
-      "capabilities": {
-        "tools": {
-          "enabled": true,
-          "endpoints": {
-            "list": "/mcp/list",
-            "read": "/mcp/read",
-            "write": "/mcp/write",
-            "delete": "/mcp/delete"
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-## Step 4: Create Local MCP Client (if needed)
-
-If Claude Desktop doesn't support direct HTTP transport, create this local client:
-
-Create `~/mcp-client.js`:
-
-```javascript
-#!/usr/bin/env node
-
-const http = require('http');
-const readline = require('readline');
-
-const SERVER_URL = process.env.MCP_SERVER_URL || 'http://localhost:3001';
-
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
-
-// MCP Protocol Handler
-async function handleRequest(request) {
-  const { method, params } = request;
-  
-  switch(method) {
-    case 'tools/list':
-      return {
-        tools: [
-          { name: 'list_files', description: 'List files in directory' },
-          { name: 'read_file', description: 'Read file contents' },
-          { name: 'write_file', description: 'Write content to file' },
-          { name: 'delete_file', description: 'Delete file or directory' }
-        ]
-      };
-      
-    case 'tools/call':
-      return callTool(params.name, params.arguments);
-      
-    default:
-      throw new Error(`Unknown method: ${method}`);
-  }
-}
-
-async function callTool(toolName, args) {
-  const endpoints = {
-    'list_files': '/mcp/list',
-    'read_file': '/mcp/read',
-    'write_file': '/mcp/write',
-    'delete_file': '/mcp/delete'
-  };
-  
-  const endpoint = endpoints[toolName];
-  if (!endpoint) {
-    throw new Error(`Unknown tool: ${toolName}`);
-  }
-  
-  const response = await fetch(`${SERVER_URL}${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(args)
-  });
-  
-  return await response.json();
-}
-
-// Main loop
-rl.on('line', async (line) => {
-  try {
-    const request = JSON.parse(line);
-    const response = await handleRequest(request);
-    console.log(JSON.stringify({ 
-      jsonrpc: '2.0',
-      id: request.id,
-      result: response 
-    }));
-  } catch (error) {
-    console.log(JSON.stringify({ 
-      jsonrpc: '2.0',
-      id: request.id,
-      error: { message: error.message }
-    }));
-  }
-});
-```
-
-Make it executable:
-```bash
-chmod +x ~/mcp-client.js
-```
-
-Update the config to point to this file:
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "node",
-      "args": ["/Users/YOUR_USERNAME/mcp-client.js"],
-      "env": {
-        "MCP_SERVER_URL": "http://localhost:3001"
-      }
-    }
-  }
-}
-```
-
-## Step 5: Restart Claude Desktop
-
-1. Quit Claude Desktop completely (Cmd+Q)
-2. Start Claude Desktop again
-3. Check **Settings** → **Developer** → **MCP Settings** to verify server is connected
-
-## Step 6: Test the Connection
-
-In Claude, try these commands:
+## Primary Deployment Command
 
 ```
-"List files on the server"
-"Create a file called test.txt with content 'Hello from Claude'"
-"Read the contents of test.txt"
+Deploy the FastMCP infrastructure from https://github.com/harrysayers7/mcp-server-infra.git to server 134.199.159.190
+
+CRITICAL RULES:
+1. Use docker-compose (with hyphen), NOT "docker compose"
+2. Always use full paths: /opt/mcp-server-infra
+3. Check if repo exists before cloning
+4. Use FastMCP version (setup-fastmcp.sh) not the basic HTTP version
+
+DEPLOYMENT STEPS:
+1. SSH into root@134.199.159.190
+2. Check if /opt/mcp-server-infra exists, if yes: cd into it and git pull
+3. If not exists: cd /opt && git clone https://github.com/harrysayers7/mcp-server-infra.git
+4. cd /opt/mcp-server-infra
+5. Run: chmod +x scripts/setup-fastmcp.sh && ./scripts/setup-fastmcp.sh
+6. Verify with: docker ps | grep fastmcp
+7. Test with: ./scripts/test-fastmcp.sh
+8. Show systemd status: systemctl status mcp-fastmcp-servers
+
+EXPECTED OUTPUT:
+- Container mcp-filesystem-fastmcp should be running on port 3001
+- Systemd service should be enabled
+- Test script should show SSE endpoint responding
 ```
 
-## Troubleshooting
+## Adding New MCP Server
 
-### SSH Tunnel Closed
-If Claude can't connect, check your SSH tunnel is still running:
-```bash
-# Check if tunnel is active
-ps aux | grep "ssh -L 3001"
+```
+Add a new MCP server called [SERVICE_NAME] to the infrastructure at /opt/mcp-server-infra
 
-# Restart tunnel if needed
-ssh -L 3001:localhost:3001 root@134.199.159.190
+RULES:
+1. Use FastMCP pattern from existing filesystem-fastmcp example
+2. Assign next available port (3002, 3003, etc)
+3. Create proper Dockerfile with Python 3.11-slim base
+4. Update docker-compose-fastmcp.yml
+5. Test before confirming deployment
+
+STEPS:
+1. SSH into root@134.199.159.190
+2. cd /opt/mcp-server-infra
+3. Create servers/[SERVICE_NAME]/server.py using FastMCP pattern
+4. Create servers/[SERVICE_NAME]/Dockerfile
+5. Add service to docker-compose-fastmcp.yml with port 300X:3000
+6. Run: docker-compose -f docker-compose-fastmcp.yml up -d --build [SERVICE_NAME]
+7. Verify: docker logs mcp-[SERVICE_NAME]
+8. Test endpoint: curl http://localhost:300X/sse
 ```
 
-### Server Not Responding
-Check server status:
-```bash
-# SSH into server
-ssh root@134.199.159.190
+## Updating Existing Server
 
-# Check Docker containers
-docker ps | grep mcp-
+```
+Update the [SERVICE_NAME] MCP server in /opt/mcp-server-infra
 
-# View logs
-docker logs mcp-filesystem --tail 50
+STEPS:
+1. SSH into root@134.199.159.190
+2. cd /opt/mcp-server-infra
+3. Edit servers/[SERVICE_NAME]/server.py
+4. Rebuild: docker-compose -f docker-compose-fastmcp.yml build [SERVICE_NAME]
+5. Restart: docker-compose -f docker-compose-fastmcp.yml up -d [SERVICE_NAME]
+6. Verify: docker logs mcp-[SERVICE_NAME] --tail 50
 ```
 
-### Claude Not Detecting MCP
-1. Verify config file is valid JSON (use jsonlint.com)
-2. Check Claude Desktop logs: `~/Library/Logs/Claude/`
-3. Try simpler config first, then add features
+## Troubleshooting Commands
 
-## Advanced: Auto-start SSH Tunnel
+```
+If deployment fails, debug the MCP infrastructure on 134.199.159.190
 
-Create `~/Library/LaunchAgents/com.mcp.tunnel.plist`:
+DIAGNOSTIC STEPS:
+1. Check containers: docker ps -a | grep mcp
+2. View logs: docker logs [CONTAINER_NAME] --tail 100
+3. Check ports: netstat -tlnp | grep 300
+4. Test health: curl http://localhost:3001/health
+5. Check systemd: systemctl status mcp-fastmcp-servers
+6. View compose logs: docker-compose -f docker-compose-fastmcp.yml logs --tail 50
+7. Restart everything: docker-compose -f docker-compose-fastmcp.yml restart
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.mcp.tunnel</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/ssh</string>
-        <string>-N</string>
-        <string>-L</string>
-        <string>3001:localhost:3001</string>
-        <string>root@134.199.159.190</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
+COMMON FIXES:
+- Port conflict: Change port in docker-compose-fastmcp.yml
+- Build cache: docker-compose -f docker-compose-fastmcp.yml build --no-cache
+- Permission issue: chmod -R 755 /opt/mcp-data
+- Clean restart: docker-compose -f docker-compose-fastmcp.yml down && docker-compose -f docker-compose-fastmcp.yml up -d
 ```
 
-Load it:
-```bash
-launchctl load ~/Library/LaunchAgents/com.mcp.tunnel.plist
+## Monitoring Health
+
+```
+Check health status of MCP infrastructure on 134.199.159.190
+
+COMMANDS:
+1. Overall status: docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+2. Resource usage: docker stats --no-stream
+3. Disk usage: df -h /opt/mcp-data
+4. Recent logs: docker-compose -f docker-compose-fastmcp.yml logs --tail 20 --timestamps
+5. Test endpoints:
+   - curl http://localhost:3001/health
+   - curl http://localhost:3001/sse
 ```
 
-Now the tunnel auto-starts when you login!
+## Full Reset
 
-## Adding More MCP Servers
+```
+Completely reset and redeploy MCP infrastructure on 134.199.159.190
 
-For each new server you add to the infrastructure:
+WARNING: This will delete all data in /opt/mcp-data
 
-1. Add new port to SSH tunnel: `ssh -L 3001:localhost:3001 -L 3002:localhost:3002 root@134.199.159.190`
-2. Add new entry to `claude_desktop_config.json`
-3. Restart Claude Desktop
+STEPS:
+1. SSH into root@134.199.159.190
+2. Stop services: docker-compose -f /opt/mcp-server-infra/docker-compose-fastmcp.yml down
+3. Remove containers: docker container prune -f
+4. Clean data: rm -rf /opt/mcp-data/*
+5. Pull latest: cd /opt/mcp-server-infra && git pull
+6. Rebuild: ./scripts/setup-fastmcp.sh
+7. Verify: docker ps | grep fastmcp
+```
 
-## Security Notes
+## Important Context for Claude Code
 
-- SSH tunnel is encrypted end-to-end
-- No ports exposed to internet
-- Only you can access via your SSH key
-- Consider SSH key-only auth (disable password auth on server)
+### Server Details
+- IP: 134.199.159.190
+- OS: Ubuntu 22.04
+- Docker: Installed with docker-compose (hyphen version)
+- Project Location: /opt/mcp-server-infra
+- Data Location: /opt/mcp-data/
 
-## Support
+### Port Assignments
+- 3001: filesystem-fastmcp
+- 3002: (next available)
+- 3003: (next available)
+- All ports bind to 127.0.0.1 only (SSH tunnel required for external access)
 
-- Check server README: https://github.com/harrysayers7/mcp-server-infra
-- View server logs: `docker-compose logs -f` (on server)
-- Test endpoints: Run `./scripts/test.sh` (on server)
+### File Structure
+```
+/opt/mcp-server-infra/
+├── docker-compose-fastmcp.yml    # Main orchestration file
+├── servers/                       # MCP server implementations
+│   └── filesystem-fastmcp/       # Example FastMCP server
+│       ├── server.py
+│       └── Dockerfile
+├── scripts/                       # Automation scripts
+│   ├── setup-fastmcp.sh          # Initial setup
+│   └── test-fastmcp.sh           # Testing script
+└── systemd/                       # Boot persistence
+```
+
+### Common Issues Claude Code Should Handle
+1. Check if directory exists before mkdir
+2. Check if container is running before starting
+3. Use absolute paths always
+4. Handle git pull conflicts gracefully
+5. Verify Docker daemon is running
+6. Check disk space before operations
+
+### Expected Success Indicators
+- `docker ps` shows containers with "Up" status
+- No errors in `docker logs`
+- SSE endpoint responds to curl
+- Systemd service is "enabled"
+- Test script completes without errors
+
+## DO NOT:
+- Use "docker compose" (space) - always use "docker-compose" (hyphen)
+- Expose ports publicly - keep 127.0.0.1 binding
+- Delete /opt/mcp-data without confirmation
+- Modify systemd services without backup
+- Change port bindings without checking conflicts
+- Run as non-root user (containers need root for port binding)
+
+## ALWAYS:
+- Verify each step before proceeding
+- Show command output for verification
+- Use absolute paths
+- Check service health after changes
+- Keep data directory permissions at 755
+- Maintain port documentation when adding services
