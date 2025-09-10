@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  mcp-filesystem-fastmcp:
+    build: ./servers/filesystem-fastmcp
+    container_name: mcp-filesystem-fastmcp
+    restart: always
+    ports:
+      - "127.0.0.1:3001:3000"  # Only accessible locally
+    volumes:
+      - /opt/mcp-data/filesystem:/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  default:
+    name: mcp-network
+    driver: bridge
