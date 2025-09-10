@@ -1,6 +1,14 @@
-# MCP Server Infrastructure
+# MCP Server Infrastructure v2
 
-**Always-on MCP servers running on Ubuntu VPS - accessible 24/7 even when your laptop is closed.**
+**Always-on MCP servers using FastMCP - proper MCP protocol implementation.**
+
+## Architecture Change
+
+We're migrating from basic HTTP endpoints to proper MCP protocol using FastMCP:
+- ✅ Native Claude Desktop support
+- ✅ Proper JSON-RPC 2.0 protocol
+- ✅ Automatic tool discovery
+- ✅ Type safety with Pydantic
 
 ## Quick Start
 
@@ -13,72 +21,94 @@ cd /opt
 git clone https://github.com/harrysayers7/mcp-server-infra.git
 cd mcp-server-infra
 
-# Run setup script
-chmod +x scripts/setup.sh
-./scripts/setup.sh
-
-# Or manually:
-docker-compose up -d
+# Choose setup:
+./scripts/setup-fastmcp.sh  # New FastMCP servers (recommended)
+# OR
+./scripts/setup.sh          # Original HTTP servers
 ```
 
-## Architecture
+## FastMCP Servers
 
+### Filesystem Server (Port 3001)
+- Proper MCP protocol via FastMCP
+- SSE transport for Claude Desktop
+- Type-safe operations
+
+### Adding New FastMCP Servers
+
+1. Create `servers/your-service/server.py`:
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP("your-service")
+
+@mcp.tool()
+def your_tool(param: str) -> str:
+    """Tool description"""
+    return f"Result: {param}"
+
+if __name__ == "__main__":
+    mcp.run(port=3002)
 ```
-Your Mac/Cursor → SSH Tunnel → Ubuntu Server → Docker Container → MCP Server
-                                (Always On)     (Auto-restarts)
+
+2. Create `servers/your-service/Dockerfile`:
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+RUN pip install fastmcp
+COPY server.py .
+CMD ["python", "server.py"]
 ```
 
-## Available MCP Servers
+3. Add to `docker-compose-fastmcp.yml`
 
-### 1. Filesystem MCP (Port 3001)
-- **Purpose**: Read/write files on the server
-- **Access**: `localhost:3001` via SSH tunnel
-- **Data**: Persisted in `/opt/mcp-data/filesystem`
+## Claude Desktop Configuration
 
-## Accessing from Your Mac
+### For FastMCP Servers (Recommended):
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-sse-client",
+        "http://localhost:3001/sse"
+      ]
+    }
+  }
+}
+```
+
+### For Original HTTP Servers:
+
+See CLAUDE.md for HTTP adapter setup.
+
+## Why FastMCP?
+
+1. **Proper MCP Protocol** - Not just HTTP endpoints
+2. **Direct Claude Support** - No adapter needed
+3. **Type Safety** - Pydantic validation
+4. **Tool Discovery** - Automatic schema generation
+5. **Better DX** - Decorators instead of boilerplate
+
+## Migration Path
+
+1. Keep existing HTTP servers running
+2. Add new servers using FastMCP
+3. Gradually migrate old servers
+4. Remove HTTP adapter layer
+
+## SSH Tunnel (Same for Both)
 
 ```bash
-# Create SSH tunnel (run on your Mac)
-ssh -L 3001:localhost:3001 root@134.199.159.190
-
-# Now access MCP at http://localhost:3001 from Cursor/Claude Desktop
+# From your Mac
+ssh -L 3001:localhost:3001 -L 3002:localhost:3002 root@134.199.159.190
 ```
 
-## Testing
+## Next Steps
 
-```bash
-# Run test script after setup
-chmod +x scripts/test.sh
-./scripts/test.sh
-```
-
-## Auto-start on Boot
-
-The setup script installs a systemd service that ensures MCP servers start when server reboots.
-
-## Adding New MCP Servers
-
-1. Create new folder in `servers/`
-2. Add to `docker-compose.yml`
-3. Assign unique port (3002, 3003, etc)
-4. Run `docker-compose up -d`
-
-## Monitoring
-
-```bash
-# View logs
-docker-compose logs -f
-
-# Check status
-docker ps
-
-# Restart if needed
-docker-compose restart
-```
-
-## Security Notes
-
-- No public ports exposed (only localhost bindings)
-- Access only via SSH tunnel
-- Data persisted in `/opt/mcp-data/`
-- No auth needed for internal services (add later if exposing publicly)
+1. Deploy FastMCP version: `./scripts/setup-fastmcp.sh`
+2. Test with: `./scripts/test-fastmcp.sh`
+3. Connect Claude Desktop using SSE client
+4. Build new services with FastMCP
